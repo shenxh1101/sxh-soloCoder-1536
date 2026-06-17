@@ -2,10 +2,11 @@ import { useState, useMemo } from 'react';
 import {
   Plus, Search, Edit, Trash2, AlertTriangle, Package, ArrowLeftRight,
   ChevronDown, ChevronUp, TrendingDown, TrendingUp, ShoppingCart, XCircle,
+  Download, Calendar,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import Modal from '@/components/Modal';
-import { formatDateTime } from '@/utils/date';
+import { formatDateTime, isBetweenDates } from '@/utils/date';
 import type { Part, StockMovement } from '@/types';
 import { PART_CATEGORIES, STOCK_MOVEMENT_REASONS } from '@/types';
 
@@ -56,6 +57,8 @@ export default function Inventory() {
   const [showMovements, setShowMovements] = useState(true);
   const [movementPartFilter, setMovementPartFilter] = useState('all');
   const [movementTypeFilter, setMovementTypeFilter] = useState<'all' | 'in' | 'out'>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   const lowStockParts = useMemo(() => parts.filter(p => p.stock < p.minStock), [parts]);
   const lowStockCount = lowStockParts.length;
@@ -83,8 +86,11 @@ export default function Inventory() {
     if (movementTypeFilter !== 'all') {
       list = list.filter(m => m.type === movementTypeFilter);
     }
+    if (startDate && endDate) {
+      list = list.filter(m => isBetweenDates(m.createdAt, startDate, endDate));
+    }
     return [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [stockMovements, movementPartFilter, movementTypeFilter]);
+  }, [stockMovements, movementPartFilter, movementTypeFilter, startDate, endDate]);
 
   function openNew() {
     setEditing(null);
@@ -130,6 +136,46 @@ export default function Inventory() {
     if (!restockId || restockQty <= 0) return;
     addStock(restockId, restockQty, restockRemark.trim() || '采购入库');
     setRestockId(null);
+  }
+
+  function exportCSV() {
+    if (filteredMovements.length === 0) {
+      alert('没有可导出的数据');
+      return;
+    }
+
+    const headers = ['时间', '零件', '类型', '原因', '数量', '变动前库存', '变动后库存', '备注'];
+    const rows = filteredMovements.map(m => [
+      formatDateTime(m.createdAt),
+      m.partName,
+      m.type === 'in' ? '入库' : '出库',
+      STOCK_MOVEMENT_REASONS[m.reason],
+      m.type === 'in' ? `+${m.quantity}` : `-${m.quantity}`,
+      m.stockBefore,
+      m.stockAfter,
+      m.remark || '-',
+    ]);
+
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('\n');
+
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    link.download = `库存流水_${dateStr}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function clearDateFilter() {
+    setStartDate('');
+    setEndDate('');
   }
 
   return (
@@ -318,41 +364,78 @@ export default function Inventory() {
 
         {showMovements && (
           <>
-            <div className="p-4 border-b border-zinc-100 flex flex-wrap items-center gap-3">
-              <select
-                value={movementPartFilter}
-                onChange={e => setMovementPartFilter(e.target.value)}
-                className="px-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-xs"
-              >
-                <option value="all">全部零件</option>
-                {parts.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}（库存：{p.stock}）</option>
-                ))}
-              </select>
-              <div className="flex rounded-lg border border-zinc-200 overflow-hidden">
-                {(['all', 'in', 'out'] as const).map(t => (
-                  <button
-                    key={t}
-                    onClick={() => setMovementTypeFilter(t)}
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                      movementTypeFilter === t
-                        ? 'bg-blue-700 text-white'
-                        : 'bg-white text-zinc-600 hover:bg-zinc-50'
-                    }`}
-                  >
-                    {t === 'all' ? '全部' : t === 'in' ? '入库' : '出库'}
-                  </button>
-                ))}
-              </div>
-              {movementPartFilter !== 'all' && (
-                <button
-                  onClick={() => setMovementPartFilter('all')}
-                  className="text-xs text-zinc-500 hover:text-zinc-700 inline-flex items-center gap-1"
+            <div className="p-4 border-b border-zinc-100">
+              <div className="flex flex-wrap items-center gap-3 mb-3">
+                <select
+                  value={movementPartFilter}
+                  onChange={e => setMovementPartFilter(e.target.value)}
+                  className="px-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-xs"
                 >
-                  <XCircle size={12} />
-                  清除零件筛选
+                  <option value="all">全部零件</option>
+                  {parts.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}（库存：{p.stock}）</option>
+                  ))}
+                </select>
+                <div className="flex rounded-lg border border-zinc-200 overflow-hidden">
+                  {(['all', 'in', 'out'] as const).map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setMovementTypeFilter(t)}
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                        movementTypeFilter === t
+                          ? 'bg-blue-700 text-white'
+                          : 'bg-white text-zinc-600 hover:bg-zinc-50'
+                      }`}
+                    >
+                      {t === 'all' ? '全部' : t === 'in' ? '入库' : '出库'}
+                    </button>
+                  ))}
+                </div>
+                {movementPartFilter !== 'all' && (
+                  <button
+                    onClick={() => setMovementPartFilter('all')}
+                    className="text-xs text-zinc-500 hover:text-zinc-700 inline-flex items-center gap-1"
+                  >
+                    <XCircle size={12} />
+                    清除零件筛选
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Calendar size={14} className="text-zinc-400" />
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={e => setStartDate(e.target.value)}
+                    className="px-3 py-1.5 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="text-zinc-400 text-sm">至</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={e => setEndDate(e.target.value)}
+                    className="px-3 py-1.5 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                {(startDate || endDate) && (
+                  <button
+                    onClick={clearDateFilter}
+                    className="text-xs text-zinc-500 hover:text-zinc-700 inline-flex items-center gap-1"
+                  >
+                    <XCircle size={12} />
+                    清除日期
+                  </button>
+                )}
+                <button
+                  onClick={exportCSV}
+                  disabled={filteredMovements.length === 0}
+                  className="ml-auto inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Download size={14} />
+                  导出 CSV
                 </button>
-              )}
+              </div>
             </div>
             <div className="max-h-[480px] overflow-y-auto">
               {filteredMovements.length === 0 ? (

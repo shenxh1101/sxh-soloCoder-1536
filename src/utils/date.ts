@@ -35,3 +35,39 @@ export function isSameDay(dateStr: string, reference: Date = new Date()): boolea
     d.getDate() === reference.getDate()
   );
 }
+
+export function isThisWeek(dateStr: string, reference: Date = new Date()): boolean {
+  const d = new Date(dateStr);
+  const ref = new Date(reference);
+  const day = ref.getDay();
+  const diff = ref.getDate() - day + (day === 0 ? -6 : 1);
+  const weekStart = new Date(ref.getFullYear(), ref.getMonth(), diff, 0, 0, 0, 0);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 7);
+  return d >= weekStart && d < weekEnd;
+}
+
+export function isThisMonth(dateStr: string, reference: Date = new Date()): boolean {
+  const d = new Date(dateStr);
+  return (
+    d.getFullYear() === reference.getFullYear() &&
+    d.getMonth() === reference.getMonth()
+  );
+}
+
+export function isInRange(dateStr: string, range: 'today' | 'week' | 'month'): boolean {
+  switch (range) {
+    case 'today': return isSameDay(dateStr);
+    case 'week': return isThisWeek(dateStr);
+    case 'month': return isThisMonth(dateStr);
+  }
+}
+
+export function isBetweenDates(dateStr: string, startDate: string, endDate: string): boolean {
+  const d = new Date(dateStr);
+  const start = new Date(startDate);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(endDate);
+  end.setHours(23, 59, 59, 999);
+  return d >= start && d <= end;
+}

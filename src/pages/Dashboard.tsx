@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, Users, Package, PhoneCall, AlertTriangle, Plus, UserPlus, ClipboardPlus, Search } from 'lucide-react';
+import { ClipboardList, Users, Package, PhoneCall, AlertTriangle, Plus, UserPlus, ClipboardPlus, Search, TrendingUp, DollarSign, Wrench, CalendarDays, ClipboardCheck } from 'lucide-react';
 import { useAppStore } from '@/store';
 import StatusBadge from '@/components/StatusBadge';
 import { formatDate, isSameDay } from '@/utils/date';
@@ -11,6 +11,9 @@ export default function Dashboard() {
   const customers = useAppStore(s => s.customers);
   const parts = useAppStore(s => s.parts);
   const followups = useAppStore(s => s.followups);
+  const getBusinessStats = useAppStore(s => s.getBusinessStats);
+
+  const [businessRange, setBusinessRange] = useState<'today' | 'week' | 'month'>('today');
 
   const lowStockParts = useMemo(() => parts.filter(p => p.stock < p.minStock), [parts]);
   const needFollowup = useMemo(() => {
@@ -37,6 +40,8 @@ export default function Dashboard() {
     };
   }, [orders, customers, lowStockParts, needFollowup]);
 
+  const businessStats = useMemo(() => getBusinessStats(businessRange), [getBusinessStats, businessRange]);
+
   const recentOrders = useMemo(() =>
     [...orders].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 6),
     [orders]
@@ -49,6 +54,38 @@ export default function Dashboard() {
     { label: '今日完成', value: stats.todayDone, icon: ClipboardPlus, color: 'from-green-600 to-green-500', to: '/orders' },
     { label: '客户总数', value: stats.totalCustomers, icon: Users, color: 'from-indigo-600 to-indigo-500', to: '/customers' },
     { label: '低库存零件', value: stats.lowStockCount, icon: AlertTriangle, color: 'from-amber-500 to-orange-500', to: '/inventory', warn: stats.lowStockCount > 0 },
+  ];
+
+  const businessCards = [
+    {
+      label: '完成工单',
+      value: businessStats.completedCount,
+      icon: ClipboardCheck,
+      color: 'text-green-600 bg-green-50',
+      to: '/orders?status=completed',
+    },
+    {
+      label: '总收入',
+      value: `¥${businessStats.totalRevenue.toFixed(2)}`,
+      icon: DollarSign,
+      color: 'text-blue-600 bg-blue-50',
+      to: '/orders?status=completed',
+    },
+    {
+      label: '零件成本',
+      value: `¥${businessStats.partsCost.toFixed(2)}`,
+      icon: Package,
+      color: 'text-amber-600 bg-amber-50',
+      to: '/inventory',
+    },
+    {
+      label: '待回访',
+      value: businessStats.followupCount,
+      icon: PhoneCall,
+      color: 'text-purple-600 bg-purple-50',
+      to: '/followups',
+      warn: businessStats.followupCount > 0,
+    },
   ];
 
   return (
@@ -79,6 +116,47 @@ export default function Dashboard() {
             </div>
           </button>
         ))}
+      </div>
+
+      <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden mb-8">
+        <div className="px-5 py-4 border-b border-zinc-100 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-semibold text-zinc-900 flex items-center gap-2">
+            <TrendingUp size={18} className="text-blue-600" />
+            经营概览
+          </h2>
+          <div className="flex rounded-lg border border-zinc-200 overflow-hidden">
+            {(['today', 'week', 'month'] as const).map(r => (
+              <button
+                key={r}
+                onClick={() => setBusinessRange(r)}
+                className={`px-4 py-1.5 text-sm font-medium transition-colors ${
+                  businessRange === r
+                    ? 'bg-blue-700 text-white'
+                    : 'bg-white text-zinc-600 hover:bg-zinc-50'
+                }`}
+              >
+                {r === 'today' ? '今天' : r === 'week' ? '本周' : '本月'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-zinc-100">
+          {businessCards.map(c => (
+            <button
+              key={c.label}
+              onClick={() => navigate(c.to)}
+              className="p-5 text-left hover:bg-zinc-50 transition-colors"
+            >
+              <div className={`inline-flex items-center justify-center w-10 h-10 rounded-lg ${c.color} mb-3`}>
+                <c.icon size={20} />
+              </div>
+              <p className="text-sm text-zinc-500">{c.label}</p>
+              <p className={`text-2xl font-bold mt-1 ${c.warn ? 'text-purple-600' : 'text-zinc-900'}`}>
+                {c.value}
+              </p>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -4,7 +4,7 @@ import type {
   StockMovement, StockMovementReason,
 } from '@/types';
 import { storage, genId } from '@/utils/storage';
-import { nowISO } from '@/utils/date';
+import { nowISO, isInRange } from '@/utils/date';
 
 interface AddPartResult {
   success: boolean;
@@ -18,6 +18,7 @@ interface AppState {
   repairParts: RepairPart[];
   followups: Followup[];
   stockMovements: StockMovement[];
+  isInitialized: boolean;
 
   initData: () => void;
 
@@ -47,6 +48,12 @@ interface AppState {
   getLowStockParts: () => Part[];
   getOrdersNeedingFollowup: () => RepairOrder[];
   getPartMovements: (partId?: string) => StockMovement[];
+  getBusinessStats: (range: 'today' | 'week' | 'month') => {
+    completedCount: number;
+    totalRevenue: number;
+    partsCost: number;
+    followupCount: number;
+  };
 }
 
 function seedInitialData() {
@@ -111,11 +118,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   repairParts: [],
   followups: [],
   stockMovements: [],
+  isInitialized: false,
 
   initData: () => {
     if (!storage.isInitialized()) {
       const seed = seedInitialData();
-      set(seed);
+      set({ ...seed, isInitialized: true });
     } else {
       set({
         customers: storage.getCustomers(),
@@ -124,6 +132,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         repairParts: storage.getRepairParts(),
         followups: storage.getFollowups(),
         stockMovements: storage.getStockMovements(),
+        isInitialized: true,
       });
     }
   },
@@ -336,5 +345,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     let list = get().stockMovements;
     if (partId) list = list.filter(m => m.partId === partId);
     return [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  },
+
+  getBusinessStats: (range) => {
+    const state = get();
+    const completed = state.orders.filter(o => o.status === 'completed' && o.pickedUpAt && isInRange(o.pickedUpAt, range));
+
+    let totalRevenue = 0;
+    let partsCost = 0;
+
+    completed.forEach(o => {
+      const orderTotal = state.getOrderTotal(o.id);
+      totalRevenue += orderTotal.total;
+      const rps = state.repairParts.filter(rp => rp.orderId === o.id);
+      rps.forEach(rp => {
+        const part = state.parts.find(p => p.id === rp.partId);
+        if (part) {
+          partsCost += part.unitPrice * rp.quantity;
+        } else {
+          partsCost += rp.unitPrice * rp.quantity;
+        }
+      });
+    });
+
+    const followupCount = state.getOrdersNeedingFollowup().length;
+
+    return {
+      completedCount: completed.length,
+      totalRevenue,
+      partsCost,
+      followupCount,
+    };
   },
 }));
