@@ -86,8 +86,21 @@ export default function Inventory() {
     if (movementTypeFilter !== 'all') {
       list = list.filter(m => m.type === movementTypeFilter);
     }
-    if (startDate && endDate) {
-      list = list.filter(m => isBetweenDates(m.createdAt, startDate, endDate));
+    if (startDate || endDate) {
+      list = list.filter(m => {
+        const d = new Date(m.createdAt);
+        if (startDate) {
+          const s = new Date(startDate);
+          s.setHours(0, 0, 0, 0);
+          if (d < s) return false;
+        }
+        if (endDate) {
+          const e = new Date(endDate);
+          e.setHours(23, 59, 59, 999);
+          if (d > e) return false;
+        }
+        return true;
+      });
     }
     return [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [stockMovements, movementPartFilter, movementTypeFilter, startDate, endDate]);
@@ -138,6 +151,14 @@ export default function Inventory() {
     setRestockId(null);
   }
 
+  function escapeCSV(value: string | number): string {
+    const str = String(value ?? '');
+    if (/[",\n\r]/.test(str)) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  }
+
   function exportCSV() {
     if (filteredMovements.length === 0) {
       alert('没有可导出的数据');
@@ -157,8 +178,8 @@ export default function Inventory() {
     ]);
 
     const csvContent = [headers, ...rows]
-      .map(row => row.map(cell => `"${cell}"`).join(','))
-      .join('\n');
+      .map(row => row.map(cell => escapeCSV(cell)).join(','))
+      .join('\r\n');
 
     const BOM = '\uFEFF';
     const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -166,7 +187,8 @@ export default function Inventory() {
     const link = document.createElement('a');
     link.href = url;
     const dateStr = new Date().toISOString().slice(0, 10);
-    link.download = `库存流水_${dateStr}.csv`;
+    const rangePart = (startDate || endDate) ? `_${startDate || '开始'}_${endDate || '至今'}` : '';
+    link.download = `库存流水${rangePart}_${dateStr}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

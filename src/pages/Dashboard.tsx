@@ -1,9 +1,14 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, Users, Package, PhoneCall, AlertTriangle, Plus, UserPlus, ClipboardPlus, Search, TrendingUp, DollarSign, Wrench, CalendarDays, ClipboardCheck } from 'lucide-react';
+import { ClipboardList, Users, Package, PhoneCall, AlertTriangle, Plus, UserPlus, ClipboardPlus, Search, TrendingUp, DollarSign, Wrench, CalendarDays, ClipboardCheck, Calendar, X } from 'lucide-react';
 import { useAppStore } from '@/store';
 import StatusBadge from '@/components/StatusBadge';
 import { formatDate, isSameDay } from '@/utils/date';
+
+type PresetRange = 'today' | 'week' | 'month';
+type BusinessRange = PresetRange | { start?: string; end?: string };
+
+const STORAGE_KEY = 'dashboard_business_range';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -13,7 +18,51 @@ export default function Dashboard() {
   const followups = useAppStore(s => s.followups);
   const getBusinessStats = useAppStore(s => s.getBusinessStats);
 
-  const [businessRange, setBusinessRange] = useState<'today' | 'week' | 'month'>('today');
+  const [preset, setPreset] = useState<PresetRange | 'custom'>('today');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.preset) setPreset(parsed.preset);
+        if (parsed.customStart) setCustomStart(parsed.customStart);
+        if (parsed.customEnd) setCustomEnd(parsed.customEnd);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ preset, customStart, customEnd }));
+    } catch {}
+  }, [preset, customStart, customEnd]);
+
+  const businessRange: BusinessRange = useMemo(() => {
+    if (preset === 'custom') return { start: customStart || undefined, end: customEnd || undefined };
+    return preset;
+  }, [preset, customStart, customEnd]);
+
+  function buildListParams(): string {
+    const params = new URLSearchParams();
+    if (preset === 'custom') {
+      if (customStart) params.set('start', customStart);
+      if (customEnd) params.set('end', customEnd);
+    } else {
+      params.set('range', preset);
+    }
+    return params.toString();
+  }
+
+  function handlePresetChange(p: PresetRange | 'custom') {
+    setPreset(p);
+    if (p !== 'custom') {
+      setCustomStart('');
+      setCustomEnd('');
+    }
+  }
 
   const lowStockParts = useMemo(() => parts.filter(p => p.stock < p.minStock), [parts]);
   const needFollowup = useMemo(() => {
@@ -56,37 +105,40 @@ export default function Dashboard() {
     { label: '低库存零件', value: stats.lowStockCount, icon: AlertTriangle, color: 'from-amber-500 to-orange-500', to: '/inventory', warn: stats.lowStockCount > 0 },
   ];
 
-  const businessCards = [
-    {
-      label: '完成工单',
-      value: businessStats.completedCount,
-      icon: ClipboardCheck,
-      color: 'text-green-600 bg-green-50',
-      to: '/orders?status=completed',
-    },
-    {
-      label: '总收入',
-      value: `¥${businessStats.totalRevenue.toFixed(2)}`,
-      icon: DollarSign,
-      color: 'text-blue-600 bg-blue-50',
-      to: '/orders?status=completed',
-    },
-    {
-      label: '零件成本',
-      value: `¥${businessStats.partsCost.toFixed(2)}`,
-      icon: Package,
-      color: 'text-amber-600 bg-amber-50',
-      to: '/inventory',
-    },
-    {
-      label: '待回访',
-      value: businessStats.followupCount,
-      icon: PhoneCall,
-      color: 'text-purple-600 bg-purple-50',
-      to: '/followups',
-      warn: businessStats.followupCount > 0,
-    },
-  ];
+  const businessCards = useMemo(() => {
+    const qs = buildListParams();
+    return [
+      {
+        label: '完成工单',
+        value: businessStats.completedCount,
+        icon: ClipboardCheck,
+        color: 'text-green-600 bg-green-50',
+        to: `/orders?status=completed&${qs}`,
+      },
+      {
+        label: '总收入',
+        value: `¥${businessStats.totalRevenue.toFixed(2)}`,
+        icon: DollarSign,
+        color: 'text-blue-600 bg-blue-50',
+        to: `/orders?status=completed&${qs}`,
+      },
+      {
+        label: '零件成本',
+        value: `¥${businessStats.partsCost.toFixed(2)}`,
+        icon: Package,
+        color: 'text-amber-600 bg-amber-50',
+        to: '/inventory',
+      },
+      {
+        label: '待回访',
+        value: businessStats.followupCount,
+        icon: PhoneCall,
+        color: 'text-purple-600 bg-purple-50',
+        to: `/followups?${qs}`,
+        warn: businessStats.followupCount > 0,
+      },
+    ];
+  }, [businessStats, preset, customStart, customEnd]);
 
   return (
     <div className="p-8 max-w-7xl mx-auto">
@@ -124,20 +176,49 @@ export default function Dashboard() {
             <TrendingUp size={18} className="text-blue-600" />
             经营概览
           </h2>
-          <div className="flex rounded-lg border border-zinc-200 overflow-hidden">
-            {(['today', 'week', 'month'] as const).map(r => (
-              <button
-                key={r}
-                onClick={() => setBusinessRange(r)}
-                className={`px-4 py-1.5 text-sm font-medium transition-colors ${
-                  businessRange === r
-                    ? 'bg-blue-700 text-white'
-                    : 'bg-white text-zinc-600 hover:bg-zinc-50'
-                }`}
-              >
-                {r === 'today' ? '今天' : r === 'week' ? '本周' : '本月'}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex rounded-lg border border-zinc-200 overflow-hidden">
+              {(['today', 'week', 'month', 'custom'] as const).map(r => (
+                <button
+                  key={r}
+                  onClick={() => handlePresetChange(r)}
+                  className={`px-4 py-1.5 text-sm font-medium transition-colors ${
+                    preset === r
+                      ? 'bg-blue-700 text-white'
+                      : 'bg-white text-zinc-600 hover:bg-zinc-50'
+                  }`}
+                >
+                  {r === 'today' ? '今天' : r === 'week' ? '本周' : r === 'month' ? '本月' : '自选'}
+                </button>
+              ))}
+            </div>
+            {preset === 'custom' && (
+              <div className="flex items-center gap-2">
+                <Calendar size={14} className="text-zinc-400" />
+                <input
+                  type="date"
+                  value={customStart}
+                  onChange={e => setCustomStart(e.target.value)}
+                  className="px-2 py-1 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <span className="text-zinc-400 text-sm">至</span>
+                <input
+                  type="date"
+                  value={customEnd}
+                  onChange={e => setCustomEnd(e.target.value)}
+                  className="px-2 py-1 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {(customStart || customEnd) && (
+                  <button
+                    onClick={() => { setCustomStart(''); setCustomEnd(''); }}
+                    className="p-1 text-zinc-400 hover:text-zinc-600"
+                    title="清除"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-zinc-100">

@@ -48,7 +48,7 @@ interface AppState {
   getLowStockParts: () => Part[];
   getOrdersNeedingFollowup: () => RepairOrder[];
   getPartMovements: (partId?: string) => StockMovement[];
-  getBusinessStats: (range: 'today' | 'week' | 'month') => {
+  getBusinessStats: (range: 'today' | 'week' | 'month' | { start?: string; end?: string }) => {
     completedCount: number;
     totalRevenue: number;
     partsCost: number;
@@ -349,7 +349,45 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   getBusinessStats: (range) => {
     const state = get();
-    const completed = state.orders.filter(o => o.status === 'completed' && o.pickedUpAt && isInRange(o.pickedUpAt, range));
+    const now = new Date();
+
+    function matchCompleted(dateStr: string): boolean {
+      if (typeof range === 'string') return isInRange(dateStr, range);
+      const d = new Date(dateStr);
+      if (range.start) {
+        const start = new Date(range.start);
+        start.setHours(0, 0, 0, 0);
+        if (d < start) return false;
+      }
+      if (range.end) {
+        const end = new Date(range.end);
+        end.setHours(23, 59, 59, 999);
+        if (d > end) return false;
+      }
+      return true;
+    }
+
+    function matchFollowupWindow(pickedUpAt: string): boolean {
+      if (typeof range === 'string') {
+        return isInRange(pickedUpAt, range);
+      }
+      const d = new Date(pickedUpAt);
+      if (range.start) {
+        const start = new Date(range.start);
+        start.setHours(0, 0, 0, 0);
+        if (d < start) return false;
+      }
+      if (range.end) {
+        const end = new Date(range.end);
+        end.setHours(23, 59, 59, 999);
+        if (d > end) return false;
+      }
+      return true;
+    }
+
+    const completed = state.orders.filter(o => 
+      o.status === 'completed' && o.pickedUpAt && matchCompleted(o.pickedUpAt)
+    );
 
     let totalRevenue = 0;
     let partsCost = 0;
@@ -368,7 +406,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     });
 
-    const followupCount = state.getOrdersNeedingFollowup().length;
+    const followupCount = state.orders.filter(o => {
+      if (o.status !== 'completed' || !o.pickedUpAt) return false;
+      const picked = new Date(o.pickedUpAt);
+      const diffDays = Math.floor((now.getTime() - picked.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays < 7) return false;
+      if (!state.followups.every(f => f.orderId !== o.id)) return false;
+      return matchFollowupWindow(o.pickedUpAt);
+    }).length;
 
     return {
       completedCount: completed.length,

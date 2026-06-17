@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Phone, FileText, Calendar, CheckCircle, AlertCircle,
-  CreditCard, Wrench, Clock, TrendingUp, Users,
+  CreditCard, Wrench, Clock, TrendingUp, Users, Package,
+  MessageSquare, ThumbsUp, ThumbsDown, BarChart3,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import StatusBadge from '@/components/StatusBadge';
@@ -74,6 +75,72 @@ export default function CustomerDetail() {
     const order = allOrders.find(o => o.id === orderId);
     return partsTotal + Math.max(0, order?.laborFee ?? 0);
   }
+
+  const deepInsights = useMemo(() => {
+    const completedOrders = orders.filter(o => o.status === 'completed').slice(0, 5);
+
+    const trend = completedOrders.map(o => ({
+      orderId: o.id,
+      date: o.pickedUpAt || o.createdAt,
+      total: calcOrderTotal(o.id),
+      appliance: o.applianceType,
+    })).reverse();
+
+    const partCount: Record<string, { name: string; count: number; total: number }> = {};
+    orders.forEach(o => {
+      const rps = repairParts.filter(rp => rp.orderId === o.id);
+      rps.forEach(rp => {
+        if (!partCount[rp.partId]) {
+          partCount[rp.partId] = { name: rp.partName, count: 0, total: 0 };
+        }
+        partCount[rp.partId].count += rp.quantity;
+        partCount[rp.partId].total += rp.unitPrice * rp.quantity;
+      });
+    });
+    const favoriteParts = Object.values(partCount)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    const customerFollowups = followups.filter(f => {
+      const o = orders.find(oo => oo.id === f.orderId);
+      return !!o;
+    });
+    const normalCount = customerFollowups.filter(f => f.result === 'normal').length;
+    const issueCount = customerFollowups.filter(f => f.result === 'issue').length;
+    const pendingFollowup = orders.filter(o => {
+      if (o.status !== 'completed' || !o.pickedUpAt) return false;
+      const now = new Date();
+      const picked = new Date(o.pickedUpAt);
+      const diffDays = Math.floor((now.getTime() - picked.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays < 7) return false;
+      return !followups.some(f => f.orderId === o.id);
+    }).length;
+
+    let serviceHint = '';
+    if (pendingFollowup > 0) {
+      serviceHint = `有 ${pendingFollowup} 笔工单待回访，建议优先跟进`;
+    } else if (issueCount > 0) {
+      serviceHint = `历史有 ${issueCount} 次回访反馈问题，下次服务需更仔细`;
+    } else if (stats.completed >= 3) {
+      serviceHint = '高价值老客户，建议提供优先服务和关怀';
+    } else if (stats.completed >= 1) {
+      serviceHint = '已建立信任，可适当推荐保养或关联服务';
+    } else {
+      serviceHint = '新客户，做好第一次服务体验很重要';
+    }
+
+    return {
+      trend,
+      favoriteParts,
+      followupSummary: {
+        total: customerFollowups.length,
+        normal: normalCount,
+        issue: issueCount,
+        pending: pendingFollowup,
+      },
+      serviceHint,
+    };
+  }, [orders, repairParts, followups, stats.completed]);
 
   if (!isInitialized) {
     return (
@@ -190,6 +257,112 @@ export default function CustomerDetail() {
             <p className="text-lg font-semibold text-zinc-900">
               {stats.lastRepair ? formatDate(stats.lastRepair) : '-'}
             </p>
+          </div>
+        </div>
+      </div>
+
+      {deepInsights.serviceHint && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5 mb-6">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+              <BarChart3 size={20} className="text-blue-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-blue-900">客户服务建议</h3>
+              <p className="text-sm text-blue-700 mt-1">{deepInsights.serviceHint}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-zinc-100 flex items-center justify-between">
+            <h2 className="font-semibold text-zinc-900 flex items-center gap-2">
+              <TrendingUp size={16} className="text-green-600" />
+              最近消费趋势
+            </h2>
+            <span className="text-xs text-zinc-400">最近 {deepInsights.trend.length} 次</span>
+          </div>
+          {deepInsights.trend.length === 0 ? (
+            <div className="p-8 text-center text-zinc-400 text-sm">暂无已完成维修记录</div>
+          ) : (
+            <div className="divide-y divide-zinc-50">
+              {deepInsights.trend.map(t => (
+                <Link
+                  key={t.orderId}
+                  to={`/orders/${t.orderId}`}
+                  className="flex items-center justify-between px-5 py-3 hover:bg-zinc-50 transition-colors"
+                >
+                  <div>
+                    <p className="text-sm text-zinc-900 font-medium">{t.appliance}</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">{formatDate(t.date)}</p>
+                  </div>
+                  <p className="text-sm font-semibold text-green-600">¥{t.total.toFixed(2)}</p>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-zinc-100 flex items-center justify-between">
+            <h2 className="font-semibold text-zinc-900 flex items-center gap-2">
+              <Package size={16} className="text-amber-600" />
+              常用更换零件
+            </h2>
+            <span className="text-xs text-zinc-400">Top {deepInsights.favoriteParts.length}</span>
+          </div>
+          {deepInsights.favoriteParts.length === 0 ? (
+            <div className="p-8 text-center text-zinc-400 text-sm">暂无零件更换记录</div>
+          ) : (
+            <div className="divide-y divide-zinc-50">
+              {deepInsights.favoriteParts.map(p => (
+                <div key={p.name} className="flex items-center justify-between px-5 py-3">
+                  <div>
+                    <p className="text-sm text-zinc-900 font-medium">{p.name}</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">累计更换 {p.count} 次</p>
+                  </div>
+                  <p className="text-sm font-semibold text-amber-600">¥{p.total.toFixed(2)}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden mb-6">
+        <div className="px-5 py-4 border-b border-zinc-100">
+          <h2 className="font-semibold text-zinc-900 flex items-center gap-2">
+            <MessageSquare size={16} className="text-purple-600" />
+            回访情况汇总
+          </h2>
+        </div>
+        <div className="grid grid-cols-4 divide-x divide-zinc-100">
+          <div className="p-5 text-center">
+            <p className="text-2xl font-bold text-zinc-900">{deepInsights.followupSummary.total}</p>
+            <p className="text-xs text-zinc-500 mt-1">总回访次数</p>
+          </div>
+          <div className="p-5 text-center">
+            <div className="flex items-center justify-center gap-1">
+              <ThumbsUp size={16} className="text-green-500" />
+              <p className="text-2xl font-bold text-green-600">{deepInsights.followupSummary.normal}</p>
+            </div>
+            <p className="text-xs text-zinc-500 mt-1">使用正常</p>
+          </div>
+          <div className="p-5 text-center">
+            <div className="flex items-center justify-center gap-1">
+              <ThumbsDown size={16} className="text-red-500" />
+              <p className="text-2xl font-bold text-red-600">{deepInsights.followupSummary.issue}</p>
+            </div>
+            <p className="text-xs text-zinc-500 mt-1">仍有问题</p>
+          </div>
+          <div className="p-5 text-center">
+            <div className="flex items-center justify-center gap-1">
+              <Clock size={16} className="text-amber-500" />
+              <p className="text-2xl font-bold text-amber-600">{deepInsights.followupSummary.pending}</p>
+            </div>
+            <p className="text-xs text-zinc-500 mt-1">待回访</p>
           </div>
         </div>
       </div>

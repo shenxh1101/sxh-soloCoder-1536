@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, Filter, Phone, Trash2, Eye } from 'lucide-react';
 import { useAppStore } from '@/store';
 import Modal from '@/components/Modal';
 import StatusBadge from '@/components/StatusBadge';
-import { formatDate } from '@/utils/date';
+import { formatDate, isInRange } from '@/utils/date';
 import type { RepairOrder, OrderStatus } from '@/types';
 import { APPLIANCE_TYPES, STATUS_LABELS } from '@/types';
 
@@ -32,13 +32,19 @@ const statusFilters: (OrderStatus | 'all')[] = ['all', 'pending', 'repairing', '
 
 export default function OrderList() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const orders = useAppStore(s => s.orders);
   const customers = useAppStore(s => s.customers);
   const addOrder = useAppStore(s => s.addOrder);
   const addCustomer = useAppStore(s => s.addCustomer);
   const deleteOrder = useAppStore(s => s.deleteOrder);
 
-  const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
+  const paramStatus = searchParams.get('status') as OrderStatus | null;
+  const paramRange = searchParams.get('range') as 'today' | 'week' | 'month' | null;
+  const paramStart = searchParams.get('start');
+  const paramEnd = searchParams.get('end');
+
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>(paramStatus || 'all');
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<NewOrderForm>(emptyForm);
@@ -48,6 +54,29 @@ export default function OrderList() {
     let list = orders;
     if (statusFilter !== 'all') {
       list = list.filter(o => o.status === statusFilter);
+    }
+    if (paramRange) {
+      list = list.filter(o => {
+        if (statusFilter === 'completed') return o.pickedUpAt && isInRange(o.pickedUpAt, paramRange);
+        return isInRange(o.createdAt, paramRange);
+      });
+    }
+    if (paramStart || paramEnd) {
+      list = list.filter(o => {
+        const dateStr = (statusFilter === 'completed' ? o.pickedUpAt : o.createdAt) || o.createdAt;
+        const d = new Date(dateStr);
+        if (paramStart) {
+          const s = new Date(paramStart);
+          s.setHours(0, 0, 0, 0);
+          if (d < s) return false;
+        }
+        if (paramEnd) {
+          const e = new Date(paramEnd);
+          e.setHours(23, 59, 59, 999);
+          if (d > e) return false;
+        }
+        return true;
+      });
     }
     const kw = search.trim().toLowerCase();
     if (kw) {
@@ -63,7 +92,7 @@ export default function OrderList() {
       });
     }
     return [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [orders, customers, statusFilter, search]);
+  }, [orders, customers, statusFilter, search, paramRange, paramStart, paramEnd]);
 
   const getCustomerName = (id: string) => customers.find(c => c.id === id)?.name ?? '-';
   const getCustomerPhone = (id: string) => customers.find(c => c.id === id)?.phone ?? '';
@@ -105,7 +134,14 @@ export default function OrderList() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-zinc-900">维修工单</h1>
-          <p className="text-sm text-zinc-500 mt-1">共 {orders.length} 条工单</p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-sm text-zinc-500">共 {filtered.length} 条工单</p>
+            {(paramRange || paramStart || paramEnd || paramStatus) && (
+              <span className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+                已按时间段筛选
+              </span>
+            )}
+          </div>
         </div>
         <button
           onClick={openNew}

@@ -1,16 +1,22 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { PhoneCall, CheckCircle, AlertCircle, MessageSquare, Clock, ArrowRight } from 'lucide-react';
 import { useAppStore } from '@/store';
 import Modal from '@/components/Modal';
 import StatusBadge from '@/components/StatusBadge';
-import { formatDate } from '@/utils/date';
+import { formatDate, isInRange } from '@/utils/date';
 
 export default function Followups() {
+  const [searchParams] = useSearchParams();
   const orders = useAppStore(s => s.orders);
   const customers = useAppStore(s => s.customers);
   const followups = useAppStore(s => s.followups);
   const addFollowup = useAppStore(s => s.addFollowup);
+
+  const paramRange = searchParams.get('range') as 'today' | 'week' | 'month' | null;
+  const paramStart = searchParams.get('start');
+  const paramEnd = searchParams.get('end');
+  const hasFilter = !!(paramRange || paramStart || paramEnd);
 
   const pending = useMemo(() => {
     const now = new Date();
@@ -19,9 +25,27 @@ export default function Followups() {
       const picked = new Date(o.pickedUpAt);
       const diffDays = Math.floor((now.getTime() - picked.getTime()) / (1000 * 60 * 60 * 24));
       if (diffDays < 7) return false;
-      return !followups.some(f => f.orderId === o.id);
+      if (!followups.every(f => f.orderId !== o.id)) return false;
+
+      if (paramRange) {
+        if (!isInRange(o.pickedUpAt, paramRange)) return false;
+      }
+      if (paramStart || paramEnd) {
+        const d = new Date(o.pickedUpAt);
+        if (paramStart) {
+          const s = new Date(paramStart);
+          s.setHours(0, 0, 0, 0);
+          if (d < s) return false;
+        }
+        if (paramEnd) {
+          const e = new Date(paramEnd);
+          e.setHours(23, 59, 59, 999);
+          if (d > e) return false;
+        }
+      }
+      return true;
     });
-  }, [orders, followups]);
+  }, [orders, followups, paramRange, paramStart, paramEnd]);
   const done = useMemo(
     () => [...followups].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [followups]
@@ -54,14 +78,21 @@ export default function Followups() {
     <div className="p-8 max-w-7xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-zinc-900">回访记录</h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          <span className="inline-flex items-center gap-1.5 text-amber-600 font-medium">
-            <Clock size={14} />
-            待回访：{pending.length}
-          </span>
-          <span className="mx-2 text-zinc-300">|</span>
-          已回访：{done.length}
-        </p>
+        <div className="flex items-center gap-2 mt-1">
+          <p className="text-sm text-zinc-500">
+            <span className="inline-flex items-center gap-1.5 text-amber-600 font-medium">
+              <Clock size={14} />
+              待回访：{pending.length}
+            </span>
+            <span className="mx-2 text-zinc-300">|</span>
+            已回访：{done.length}
+          </p>
+          {hasFilter && (
+            <span className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+              已按时间段筛选
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
