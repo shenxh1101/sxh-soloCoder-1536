@@ -20,7 +20,7 @@ export default function CustomerDetail() {
     const rps = repairParts.filter(rp => rp.orderId === orderId);
     const partsTotal = rps.reduce((sum, rp) => sum + rp.unitPrice * rp.quantity, 0);
     const order = allOrders.find(o => o.id === orderId);
-    return partsTotal + (order?.laborFee ?? 0);
+    return partsTotal + Math.max(0, order?.laborFee ?? 0);
   }
 
   if (!customer) {

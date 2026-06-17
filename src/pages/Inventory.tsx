@@ -1,9 +1,13 @@
 import { useState, useMemo } from 'react';
-import { Plus, Search, Edit, Trash2, AlertTriangle, Package } from 'lucide-react';
+import {
+  Plus, Search, Edit, Trash2, AlertTriangle, Package, ArrowLeftRight,
+  ChevronDown, ChevronUp, TrendingDown, TrendingUp, ShoppingCart, XCircle,
+} from 'lucide-react';
 import { useAppStore } from '@/store';
 import Modal from '@/components/Modal';
-import type { Part } from '@/types';
-import { PART_CATEGORIES } from '@/types';
+import { formatDateTime } from '@/utils/date';
+import type { Part, StockMovement } from '@/types';
+import { PART_CATEGORIES, STOCK_MOVEMENT_REASONS } from '@/types';
 
 type FormData = Omit<Part, 'id'>;
 
@@ -15,11 +19,30 @@ const emptyForm: FormData = {
   minStock: 0,
 };
 
+function movementColor(type: StockMovement['type']) {
+  return type === 'in'
+    ? 'bg-green-50 text-green-700 border-green-200'
+    : 'bg-red-50 text-red-700 border-red-200';
+}
+function movementIcon(type: StockMovement['type']) {
+  return type === 'in' ? TrendingUp : TrendingDown;
+}
+function movementReasonColor(reason: StockMovement['reason']) {
+  switch (reason) {
+    case 'purchase': return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'repair': return 'bg-amber-50 text-amber-700 border-amber-200';
+    case 'cancel_repair': return 'bg-zinc-50 text-zinc-700 border-zinc-200';
+    default: return 'bg-zinc-50 text-zinc-700 border-zinc-200';
+  }
+}
+
 export default function Inventory() {
   const parts = useAppStore(s => s.parts);
   const addPart = useAppStore(s => s.addPart);
   const updatePart = useAppStore(s => s.updatePart);
   const deletePart = useAppStore(s => s.deletePart);
+  const addStock = useAppStore(s => s.addStock);
+  const stockMovements = useAppStore(s => s.stockMovements);
 
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -29,6 +52,13 @@ export default function Inventory() {
   const [form, setForm] = useState<FormData>(emptyForm);
   const [restockId, setRestockId] = useState<string | null>(null);
   const [restockQty, setRestockQty] = useState(0);
+  const [restockRemark, setRestockRemark] = useState('采购入库');
+  const [showMovements, setShowMovements] = useState(true);
+  const [movementPartFilter, setMovementPartFilter] = useState('all');
+  const [movementTypeFilter, setMovementTypeFilter] = useState<'all' | 'in' | 'out'>('all');
+
+  const lowStockParts = useMemo(() => parts.filter(p => p.stock < p.minStock), [parts]);
+  const lowStockCount = lowStockParts.length;
 
   const filtered = useMemo(() => {
     let list = parts;
@@ -36,7 +66,7 @@ export default function Inventory() {
       list = list.filter(p => p.category === categoryFilter);
     }
     if (onlyLowStock) {
-      list = list.filter(p => p.stock <= p.minStock);
+      list = list.filter(p => p.stock < p.minStock);
     }
     const kw = search.trim().toLowerCase();
     if (kw) {
@@ -45,7 +75,16 @@ export default function Inventory() {
     return list;
   }, [parts, categoryFilter, onlyLowStock, search]);
 
-  const lowStockCount = parts.filter(p => p.stock <= p.minStock).length;
+  const filteredMovements = useMemo(() => {
+    let list = stockMovements;
+    if (movementPartFilter !== 'all') {
+      list = list.filter(m => m.partId === movementPartFilter);
+    }
+    if (movementTypeFilter !== 'all') {
+      list = list.filter(m => m.type === movementTypeFilter);
+    }
+    return [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [stockMovements, movementPartFilter, movementTypeFilter]);
 
   function openNew() {
     setEditing(null);
@@ -83,14 +122,13 @@ export default function Inventory() {
 
   function openRestock(p: Part) {
     setRestockId(p.id);
-    setRestockQty(p.minStock * 2 - p.stock || 5);
+    setRestockQty(Math.max(1, p.minStock * 2 - p.stock || 5));
+    setRestockRemark('采购入库');
   }
-
-  const addStock = useAppStore(s => s.addStock);
 
   function handleRestock() {
     if (!restockId || restockQty <= 0) return;
-    addStock(restockId, restockQty);
+    addStock(restockId, restockQty, restockRemark.trim() || '采购入库');
     setRestockId(null);
   }
 
@@ -102,9 +140,9 @@ export default function Inventory() {
           <p className="text-sm text-zinc-500 mt-1">
             共 {parts.length} 种零件
             {lowStockCount > 0 && (
-              <span className="ml-2 inline-flex items-center gap-1 text-amber-600">
+              <span className="ml-2 inline-flex items-center gap-1 text-amber-600 font-medium">
                 <AlertTriangle size={12} />
-                {lowStockCount} 种低于最低库存
+                {lowStockCount} 种低于最低库存（需补货）
               </span>
             )}
           </p>
@@ -121,21 +159,24 @@ export default function Inventory() {
       {lowStockCount > 0 && (
         <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl p-4">
           <div className="flex items-center gap-2 text-amber-700 font-medium mb-2">
-            <AlertTriangle size={18} className="animate-pulse-slow" />
-            库存预警（{lowStockCount}）
+            <AlertTriangle size={18} className={lowStockCount > 0 ? 'animate-pulse-slow' : ''} />
+            库存预警（{lowStockCount}）— 低于最低库存
           </div>
           <div className="flex flex-wrap gap-2">
-            {parts.filter(p => p.stock <= p.minStock).slice(0, 8).map(p => (
+            {lowStockParts.slice(0, 8).map(p => (
               <span key={p.id} className="inline-flex items-center gap-1.5 bg-white border border-amber-200 text-amber-800 px-3 py-1 rounded-full text-xs font-medium">
                 <Package size={12} />
-                {p.name} · 剩 {p.stock}
+                {p.name} · 剩 {p.stock} / 最低 {p.minStock}
               </span>
             ))}
+            {lowStockParts.length > 8 && (
+              <span className="text-xs text-amber-600 px-2 py-1">+{lowStockParts.length - 8} 种...</span>
+            )}
           </div>
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden mb-6">
         <div className="p-4 border-b border-zinc-100 flex flex-wrap items-center gap-3">
           <div className="relative flex-1 max-w-xs">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
@@ -167,73 +208,216 @@ export default function Inventory() {
           </label>
         </div>
 
-        <table className="w-full">
-          <thead className="bg-zinc-50 border-b border-zinc-100">
-            <tr>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">零件名称</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">分类</th>
-              <th className="text-right px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">单价</th>
-              <th className="text-right px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">当前库存</th>
-              <th className="text-right px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">最低库存</th>
-              <th className="text-right px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">操作</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-50">
-            {filtered.length === 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-zinc-50 border-b border-zinc-100">
               <tr>
-                <td colSpan={6} className="px-5 py-12 text-center text-zinc-400 text-sm">暂无零件数据</td>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">零件名称</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">分类</th>
+                <th className="text-right px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">单价</th>
+                <th className="text-right px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">当前库存</th>
+                <th className="text-right px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">最低库存</th>
+                <th className="text-right px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">操作</th>
               </tr>
-            ) : (
-              filtered.map(p => {
-                const isLow = p.stock <= p.minStock;
-                return (
-                  <tr key={p.id} className={`hover:bg-zinc-50 transition-colors ${isLow ? 'bg-amber-50/50' : ''}`}>
-                    <td className="px-5 py-4">
-                      <span className="font-medium text-zinc-900">{p.name}</span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className="text-xs bg-zinc-100 text-zinc-600 px-2 py-1 rounded">{p.category}</span>
-                    </td>
-                    <td className="px-5 py-4 text-sm text-zinc-600 text-right">¥{p.unitPrice.toFixed(2)}</td>
-                    <td className="px-5 py-4 text-right">
-                      <span className={`font-semibold text-sm ${isLow ? 'text-amber-600' : 'text-zinc-900'}`}>
-                        {p.stock}
-                      </span>
-                      {isLow && <AlertTriangle size={12} className="inline-block ml-1 text-amber-500" />}
-                    </td>
-                    <td className="px-5 py-4 text-sm text-zinc-500 text-right">{p.minStock}</td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center justify-end gap-1">
-                        {isLow && (
+            </thead>
+            <tbody className="divide-y divide-zinc-50">
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-12 text-center text-zinc-400 text-sm">暂无零件数据</td>
+                </tr>
+              ) : (
+                filtered.map(p => {
+                  const isLow = p.stock < p.minStock;
+                  const isExactlyMin = p.stock === p.minStock;
+                  return (
+                    <tr key={p.id} className={`hover:bg-zinc-50 transition-colors ${isLow ? 'bg-amber-50/50' : ''}`}>
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setMovementPartFilter(p.id);
+                              setShowMovements(true);
+                            }}
+                            className="p-1 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            title="查看流水"
+                          >
+                            <ArrowLeftRight size={14} />
+                          </button>
+                          <span className="font-medium text-zinc-900">{p.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4">
+                        <span className="text-xs bg-zinc-100 text-zinc-600 px-2 py-1 rounded">{p.category}</span>
+                      </td>
+                      <td className="px-5 py-4 text-sm text-zinc-600 text-right">¥{p.unitPrice.toFixed(2)}</td>
+                      <td className="px-5 py-4 text-right">
+                        <span className={`font-semibold text-sm ${
+                          isLow ? 'text-amber-600' :
+                          isExactlyMin ? 'text-blue-600' :
+                          'text-zinc-900'
+                        }`}>
+                          {p.stock}
+                        </span>
+                        {isLow && <AlertTriangle size={12} className="inline-block ml-1 text-amber-500" />}
+                        {isExactlyMin && !isLow && (
+                          <span className="inline-block ml-1 text-[10px] text-blue-500 align-middle">（等于最低）</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 text-sm text-zinc-500 text-right">{p.minStock}</td>
+                      <td className="px-5 py-4">
+                        <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={() => openRestock(p)}
-                            className="px-2 py-1 rounded-md text-xs font-medium text-white bg-amber-500 hover:bg-amber-600 transition-colors"
+                            className="px-2 py-1 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"
+                            title="补货"
                           >
-                            进货
+                            <span className="inline-flex items-center gap-1">
+                              <ShoppingCart size={11} />
+                              进货
+                            </span>
                           </button>
-                        )}
-                        <button
-                          onClick={() => openEdit(p)}
-                          className="p-1.5 rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 transition-colors"
-                          title="编辑"
-                        >
-                          <Edit size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(p)}
-                          className="p-1.5 rounded-md text-zinc-500 hover:bg-red-50 hover:text-red-600 transition-colors"
-                          title="删除"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                          <button
+                            onClick={() => openEdit(p)}
+                            className="p-1.5 rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 transition-colors"
+                            title="编辑"
+                          >
+                            <Edit size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(p)}
+                            className="p-1.5 rounded-md text-zinc-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+                            title="删除"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden">
+        <button
+          onClick={() => setShowMovements(v => !v)}
+          className="w-full px-5 py-4 flex items-center justify-between border-b border-zinc-100 hover:bg-zinc-50 transition-colors"
+        >
+          <h2 className="font-semibold text-zinc-900 flex items-center gap-2">
+            <ArrowLeftRight size={16} className="text-blue-600" />
+            出入库流水
+            <span className="text-xs bg-zinc-100 text-zinc-600 rounded-full px-2 py-0.5">
+              {stockMovements.length}
+            </span>
+          </h2>
+          {showMovements ? <ChevronUp size={18} className="text-zinc-400" /> : <ChevronDown size={18} className="text-zinc-400" />}
+        </button>
+
+        {showMovements && (
+          <>
+            <div className="p-4 border-b border-zinc-100 flex flex-wrap items-center gap-3">
+              <select
+                value={movementPartFilter}
+                onChange={e => setMovementPartFilter(e.target.value)}
+                className="px-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-xs"
+              >
+                <option value="all">全部零件</option>
+                {parts.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}（库存：{p.stock}）</option>
+                ))}
+              </select>
+              <div className="flex rounded-lg border border-zinc-200 overflow-hidden">
+                {(['all', 'in', 'out'] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setMovementTypeFilter(t)}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      movementTypeFilter === t
+                        ? 'bg-blue-700 text-white'
+                        : 'bg-white text-zinc-600 hover:bg-zinc-50'
+                    }`}
+                  >
+                    {t === 'all' ? '全部' : t === 'in' ? '入库' : '出库'}
+                  </button>
+                ))}
+              </div>
+              {movementPartFilter !== 'all' && (
+                <button
+                  onClick={() => setMovementPartFilter('all')}
+                  className="text-xs text-zinc-500 hover:text-zinc-700 inline-flex items-center gap-1"
+                >
+                  <XCircle size={12} />
+                  清除零件筛选
+                </button>
+              )}
+            </div>
+            <div className="max-h-[480px] overflow-y-auto">
+              {filteredMovements.length === 0 ? (
+                <div className="p-10 text-center text-zinc-400 text-sm">
+                  <ArrowLeftRight size={32} className="mx-auto mb-2 text-zinc-300" />
+                  暂无出入库记录
+                </div>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-zinc-50 border-b border-zinc-100 sticky top-0">
+                    <tr>
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">时间</th>
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">零件</th>
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">类型</th>
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">原因</th>
+                      <th className="text-right px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">数量</th>
+                      <th className="text-right px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">库存变化</th>
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">备注</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-50">
+                    {filteredMovements.slice(0, 200).map(m => {
+                      const Icon = movementIcon(m.type);
+                      return (
+                        <tr key={m.id} className="hover:bg-zinc-50/60 transition-colors">
+                          <td className="px-5 py-3 text-xs text-zinc-500 whitespace-nowrap">
+                            {formatDateTime(m.createdAt)}
+                          </td>
+                          <td className="px-5 py-3 text-sm text-zinc-800 font-medium">{m.partName}</td>
+                          <td className="px-5 py-3">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-medium ${movementColor(m.type)}`}>
+                              <Icon size={11} />
+                              {m.type === 'in' ? '入库' : '出库'}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3">
+                            <span className={`inline-block px-2 py-0.5 rounded border text-xs font-medium ${movementReasonColor(m.reason)}`}>
+                              {STOCK_MOVEMENT_REASONS[m.reason]}
+                            </span>
+                          </td>
+                          <td className={`px-5 py-3 text-sm text-right font-semibold ${
+                            m.type === 'in' ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {m.type === 'in' ? '+' : '-'}{m.quantity}
+                          </td>
+                          <td className="px-5 py-3 text-xs text-zinc-500 text-right whitespace-nowrap">
+                            {m.stockBefore} → <span className="text-zinc-800 font-medium">{m.stockAfter}</span>
+                          </td>
+                          <td className="px-5 py-3 text-xs text-zinc-500 max-w-[220px] truncate">
+                            {m.remark || '-'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+              {filteredMovements.length > 200 && (
+                <div className="px-5 py-3 text-center text-xs text-zinc-400 border-t border-zinc-100 bg-zinc-50">
+                  仅显示最近 200 条
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       <Modal
@@ -296,6 +480,11 @@ export default function Inventory() {
               />
             </div>
           </div>
+          {!editing && form.stock > 0 && (
+            <p className="text-xs text-zinc-500 bg-zinc-50 border border-zinc-100 rounded-md px-3 py-2">
+              💡 新增时录入的初始库存将自动记录为"初始入库"流水
+            </p>
+          )}
           <div className="flex justify-end gap-3 pt-2">
             <button
               onClick={() => setModalOpen(false)}
@@ -328,6 +517,16 @@ export default function Inventory() {
               min={1}
               value={restockQty}
               onChange={e => setRestockQty(Math.max(1, Number(e.target.value) || 1))}
+              className="w-full px-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-zinc-700 mb-1.5">入库备注</label>
+            <input
+              type="text"
+              value={restockRemark}
+              onChange={e => setRestockRemark(e.target.value)}
+              placeholder="如：采购入库、赠送、盘盈等"
               className="w-full px-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>

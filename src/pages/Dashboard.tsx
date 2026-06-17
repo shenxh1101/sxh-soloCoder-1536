@@ -12,7 +12,7 @@ export default function Dashboard() {
   const parts = useAppStore(s => s.parts);
   const followups = useAppStore(s => s.followups);
 
-  const lowStockParts = useMemo(() => parts.filter(p => p.stock <= p.minStock), [parts]);
+  const lowStockParts = useMemo(() => parts.filter(p => p.stock < p.minStock), [parts]);
   const needFollowup = useMemo(() => {
     const now = new Date();
     return orders.filter(o => {

@@ -1,4 +1,4 @@
-import type { Customer, Part, RepairOrder, RepairPart, Followup } from '@/types';
+import type { Customer, Part, RepairOrder, RepairPart, Followup, StockMovement } from '@/types';
 
 const STORAGE_KEYS = {
   customers: 'repair_customers',
@@ -6,6 +6,7 @@ const STORAGE_KEYS = {
   orders: 'repair_orders',
   repairParts: 'repair_repair_parts',
   followups: 'repair_followups',
+  stockMovements: 'repair_stock_movements',
   initialized: 'repair_initialized',
 };
 
@@ -38,6 +39,9 @@ export const storage = {
 
   getFollowups: (): Followup[] => read<Followup[]>(STORAGE_KEYS.followups, []),
   setFollowups: (v: Followup[]) => write(STORAGE_KEYS.followups, v),
+
+  getStockMovements: (): StockMovement[] => read<StockMovement[]>(STORAGE_KEYS.stockMovements, []),
+  setStockMovements: (v: StockMovement[]) => write(STORAGE_KEYS.stockMovements, v),
 
   isInitialized: (): boolean => read<boolean>(STORAGE_KEYS.initialized, false),
   markInitialized: () => write(STORAGE_KEYS.initialized, true),
